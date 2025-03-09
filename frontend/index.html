@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Detection</title>
+    <link rel="stylesheet" href="style.css"> <!-- Link to the external stylesheet -->
+</head>
+<body>
+    <div class="container">
+        <h1>Object Detection with YOLO</h1>
+        <input type="file" id="fileInput" accept="image/*">
+        <button id="submitButton">Submit</button>
+        <button id="startWebcam">Start Webcam</button>
+        <button id="stopWebcam">Stop Webcam</button>
+        <br>
+        <video id="videoElement" autoplay></video>
+        <canvas id="canvas" width="640" height="640"></canvas>
+        <div id="error"></div> <!-- Div to display error messages -->
+    </div>
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const submitButton = document.getElementById('submitButton');
+        const startWebcam = document.getElementById('startWebcam');
+        const stopWebcam = document.getElementById('stopWebcam');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const errorDiv = document.getElementById('error'); // Reference for error display
+
+        let videoStream;
+        let captureInterval;
+
+        submitButton.addEventListener('click', () => {
+            const file = fileInput.files[0];
+            if (!file) {
+                errorDiv.textContent = "Please upload an image."; // Display error message
+                return;
+            } else {
+                errorDiv.textContent = ""; // Clear previous error message
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('http://localhost:5000/predict', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Clear the canvas
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw the image
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    // Show the canvas and draw the image
+                    canvas.style.display = 'block'; // Show canvas
+                    context.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    // Draw bounding boxes based on class
+                    data.boxes.forEach((box, index) => {
+                        const [x1, y1, x2, y2] = box;
+                        context.lineWidth = 2;
+
+                        // Set color based on class
+                        if (data.classes[index] === 0) {
+                            context.strokeStyle = 'red'; // Red for class 0
+                        } else if (data.classes[index] === 1) {
+                            context.strokeStyle = 'green'; // Green for class 1
+                        } else {
+                            context.strokeStyle = 'blue'; // Optional: default color for other classes
+                        }
+
+                        context.strokeRect(x1, y1, x2 - x1, y2 - y1);  // Draw bounding box
+
+                        // Optional: Draw class label
+                        context.fillStyle = 'red';
+                        context.fillText(`Class: ${data.classes[index]}, Score: ${data.scores[index].toFixed(2)}`, x1, y1 > 10 ? y1 - 5 : 10);
+                    });
+                };
+            })
+            .catch(error => {
+                console.error('Error occurred while predicting:', error);
+                errorDiv.textContent = "An error occurred during prediction."; // Display error message
+            });
+        });
+
+        startWebcam.addEventListener('click', async () => {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const video = document.getElementById('videoElement');
+                video.srcObject = videoStream;
+                video.style.display = 'block'; // Show video element
+
+                video.addEventListener('play', () => {
+                    captureInterval = setInterval(() => {
+                        if (!video.paused && !video.ended) {
+                            // Capture frame and send to the server
+                            context.clearRect(0, 0, canvas.width, canvas.height);
+                            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                            
+                            canvas.toBlob((blob) => {
+                                const formData = new FormData();
+                                formData.append('file', blob, 'frame.jpg'); // Append the blob to FormData
+
+                                // Send the blob to the server for prediction
+                                fetch('http://localhost:5000/predict', {
+                                    method: 'POST',
+                                    body: formData
+                                })
+                                .then(response => response.json())
+                                .then(data => {
+                                    // Draw bounding boxes on the canvas based on class
+                                    data.boxes.forEach((box, index) => {
+                                        const [x1, y1, x2, y2] = box;
+                                        context.lineWidth = 2;
+
+                                        // Set color based on class
+                                        if (data.classes[index] === 0) {
+                                            context.strokeStyle = 'red'; // Red for class 0
+                                        } else if (data.classes[index] === 1) {
+                                            context.strokeStyle = 'green'; // Green for class 1
+                                        } else {
+                                            context.strokeStyle = 'blue'; // Optional: default color for other classes
+                                        }
+
+                                        context.strokeRect(x1, y1, x2 - x1, y2 - y1);  // Draw bounding box
+
+                                        // Optional: Draw class label
+                                        context.fillStyle = 'red';
+                                        context.fillText(`Class: ${data.classes[index]}, Score: ${data.scores[index].toFixed(2)}`, x1, y1 > 10 ? y1 - 5 : 10);
+                                    });
+                                })
+                                .catch(error => {
+                                    console.error('Error occurred while predicting:', error);
+                                    errorDiv.textContent = "An error occurred during prediction."; // Display error message
+                                });
+                            }, 'image/jpeg');
+                        }
+                    }, 1000); // Capture every second (adjust as needed)
+                });
+            } catch (error) {
+                console.error('Error accessing the webcam:', error);
+                errorDiv.textContent = "Could not access the webcam."; // Display error message
+            }
+        });
+
+        stopWebcam.addEventListener('click', () => {
+            // Stop capturing frames
+            clearInterval(captureInterval);
+            const video = document.getElementById('videoElement');
+            video.srcObject.getTracks().forEach(track => track.stop()); // Stop all video tracks
+            video.srcObject = null; // Clear the video stream
+            video.style.display = 'none'; // Hide video element
+        });
+    </script>
+</body>
+</html>
